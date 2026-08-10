@@ -21,14 +21,28 @@
 #            docker images day12-agent:prod     # xem dung lượng
 # ═══════════════════════════════════════════════════════════════════
 
-FROM python:3.11
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-COPY . .
+COPY requirements.txt .
 
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-EXPOSE 8000
+FROM python:3.11-slim AS runtime
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+WORKDIR /app
+
+COPY --from=builder /install /usr/local
+COPY app ./app
+COPY utils ./utils
+
+RUN useradd --create-home --uid 10001 appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()" || exit 1
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
